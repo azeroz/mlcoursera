@@ -1,0 +1,98 @@
+---
+title: "Practical Machine Learning Project"
+output:
+  pdf_document:
+    keep_tex: yes
+  html_document:
+    keep_md: yes
+---
+
+### Executive Summary
+Our goal is to use data from accelerometers on the belt, forearm, and dumbbell of 6 participants to quantify how well they are doing a particular activity. We will accomplish this by training a prediction model - a random forest classifier - on the accelerometer data.
+
+The data for this project comes from this source: http://groupware.les.inf.puc-rio.br/har.
+
+### Load Options
+```{r, warning = FALSE}
+suppressPackageStartupMessages(library(caret))
+suppressPackageStartupMessages(library(doMC))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(scales))
+
+set.seed(8832)
+registerDoMC(cores = 4)
+```
+
+### Exploratory Analysis and Feature Selection
+```{r, echo = TRUE}
+training_URL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_URL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(training_URL,na.strings = c("NA",""))
+test <- read.csv(test_URL,na.strings = c("NA",""))
+```
+
+Remove unrelevant variables that are unlikely to be related to dependent variables.
+```{r, echo = TRUE}
+remove = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+training.dere <- training[, -which(names(training) %in% remove)]
+dim(training.dere)
+```
+
+Remove NA variables that would not be useful for training the model.
+```{r echo = TRUE}
+training.omitna <- training.dere[, colSums(is.na(training.dere)) == 0]
+dim(training.omitna)
+```
+
+Split data to training and testing for cross validation, use 70% for the training set, 30% for the testing set.
+```{r echo = TRUE}
+inTrain <- createDataPartition(y = training.omitna$classe, p = 0.7, list = F)
+training <- training.omitna[inTrain, ]
+testing <- training.omitna[-inTrain, ]
+
+```
+
+Our training data set has `r dim(training)[1]` samples and `r dim(training)[2]` variables for testing and our testing data set has `r dim(testing)[1]` samples and `r dim(testing)[2]` variables for testing.
+
+### Fitting Random Forests with Cross Validation
+Use 5-fold cross validation and fit the model using the Random Forests algorithm. This should give us a relatively low out of sample error rate.
+
+```{r, echo = TRUE, cache = TRUE}
+traincontrol <- trainControl(method = "cv", number = 5)
+
+rf_model <- train(classe ~ ., data = training, method = "rf",
+                  trControl = traincontrol,
+                  prox = TRUE, allowParallel = TRUE)
+print(rf_model)
+print(rf_model$finalModel)
+```
+
+With the model having been fit with training data, we use it for predictions on test data.
+
+### Out of Sample Accuracy and Error Estimation
+With the model having been fit with training data, we use it for predictions on test data set aside during variable selection. We generate the confusion matrix and estimate the out of sample error rate. The testing data set should be an unbiased estimate of the random forest's prediction accuracy.
+
+```{r, echo = TRUE}
+# Predict the values for 'Classe' by applying the t rained model to the testing data set.
+confMatrix <- confusionMatrix(predict(rf_model, newdata = testing), testing$classe)
+confMatrix
+```
+
+The expected out of sample error rate is `r percent(1-rf_model$results[1,2])` as the accuracy of the model observed above is `r percent(rf_model$results[1,2])`. Calculating the out of sample error (the cross-validation estimate is an out-of-sample estimate) we get the value of `r percent(1-confMatrix$overall[1])`.
+
+### Predict the 20 test cases
+Finally, to predict the classe of the testing dataset, we're applying the prediction using the model we've trained and output the results in the respective files as adviced by the instructor:
+
+```{r eval = FALSE}
+test_prediction <- predict(rf_model, test)
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(test_prediction)
+```
